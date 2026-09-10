@@ -1,0 +1,21 @@
+{
+  "labels": [
+    "friend",
+    "hello",
+    "help",
+    "iloveyou",
+    "please",
+    "pray",
+    "stop",
+    "yes"
+  ],
+  "feature_layout": "dual_hand",
+  "features_per_hand": 57,
+  "n_features": 114,
+  "input_name": "input",
+  "output_names": [
+    "label",
+    "probabilities"
+  ],
+  "sklearn_version": "1.2.2"
+}
