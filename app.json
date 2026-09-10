@@ -8,7 +8,12 @@
     "scheme": "camerasigns",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.unforgiven.camerasigns",
+      "infoPlist": {
+        "NSCameraUsageDescription": "camera-signs needs camera access to recognize hand signs in real time."
+      },
+      "bundleIdentifier": "com.unforgiven.camerasigns"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +23,10 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.unforgiven.camerasigns"
+      "package": "com.unforgiven.camerasigns",
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "output": "static",
