@@ -14,7 +14,12 @@
  * NOTE: This is Windows-authored and must be validated by building the iOS app
  * in Xcode on macOS.
  */
-const { withXcodeProject, withDangerousMod, withPodfile } = require('@expo/config-plugins');
+const {
+  withXcodeProject,
+  withDangerousMod,
+  withPodfile,
+  IOSConfig,
+} = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
@@ -76,10 +81,20 @@ const withXcodeReferences = (config) =>
       }
     }
 
+    // Expo templates omit a PBX "Resources" group; xcode's addResourceFile
+    // crashes on null when that group is missing. Create it first, then use
+    // Expo's helper which wires the file into the Resources build phase.
+    IOSConfig.XcodeUtils.ensureGroupRecursively(project, 'Resources');
     for (const file of TASK_FILES) {
       const relPath = `${projectName}/${file}`;
       if (!project.hasFile(relPath)) {
-        project.addResourceFile(relPath, { target }, groupKey);
+        IOSConfig.XcodeUtils.addResourceFileToGroup({
+          filepath: relPath,
+          groupName: 'Resources',
+          project,
+          isBuildFile: true,
+          verbose: false,
+        });
       }
     }
 
