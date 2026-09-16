@@ -3,10 +3,12 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
+    "@expo/schema-utils": "~56.0.2",
     "@expo/ui": "~56.0.18",
     "expo": "~56.0.12",
     "expo-asset": "~56.0.17",
     "expo-constants": "~56.0.18",
+    "expo-dev-client": "~56.0.26",
     "expo-device": "~56.0.4",
     "expo-font": "~56.0.7",
     "expo-glass-effect": "~56.0.4",

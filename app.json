@@ -12,8 +12,7 @@
       "bundleIdentifier": "com.unforgiven.camerasigns",
       "infoPlist": {
         "NSCameraUsageDescription": "camera-signs needs camera access to recognize hand signs in real time."
-      },
-      "bundleIdentifier": "com.unforgiven.camerasigns"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -70,6 +69,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "20137ca0-94e3-4acb-a612-ee49c0b56725"
+      }
+    },
+    "owner": "sign-language-org"
   }
 }
