@@ -1,17 +1,20 @@
 {
   "expo": {
-    "name": "camera-signs",
-    "slug": "camera-signs",
+    "name": "DigiSignHK",
+    "slug": "digisignhk",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "camerasigns",
+    "scheme": "digisignhk",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.unforgiven.camerasigns",
+      "bundleIdentifier": "com.abigail.digisignhk",
       "infoPlist": {
-        "NSCameraUsageDescription": "camera-signs needs camera access to recognize hand signs in real time."
+        "NSCameraUsageDescription": "DigiSignHK needs camera access to recognize hand signs in real time."
+      },
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
@@ -22,7 +25,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.unforgiven.camerasigns",
+      "package": "com.abigail.digisignhk",
       "permissions": [
         "android.permission.CAMERA"
       ]
@@ -47,7 +50,7 @@
       [
         "react-native-vision-camera",
         {
-          "cameraPermissionText": "camera-signs needs camera access to recognize hand signs in real time.",
+          "cameraPermissionText": "DigiSignHK needs camera access to recognize hand signs in real time.",
           "enableMicrophonePermission": false
         }
       ],
@@ -73,7 +76,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "20137ca0-94e3-4acb-a612-ee49c0b56725"
+        "projectId": "dc7b0eb2-0831-4302-a8f0-f1cbc68abbe7"
       }
     },
     "owner": "sign-language-org"

@@ -1,5 +1,5 @@
 {
-  "name": "camera-signs",
+  "name": "digisignhk",
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
@@ -46,7 +46,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "postinstall": "node ./scripts/fix-onnxruntime-autolink.js && node ./scripts/fix-windows-cmake.js"
+    "postinstall": "node ./scripts/fix-onnxruntime-autolink.js && node ./scripts/fix-windows-cmake.js",
+    "build:production:ios": "eas build --platform ios --profile production"
   },
   "private": true
 }
