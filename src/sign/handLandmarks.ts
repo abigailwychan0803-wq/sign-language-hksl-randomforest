@@ -11,7 +11,8 @@ import { VisionCameraProxy, type Frame } from 'react-native-vision-camera';
 import type { HandDetectionResult } from './types';
 
 const plugin = VisionCameraProxy.initFrameProcessorPlugin('handLandmarker', {
-  enableFace: false,
+  // Motion features use the mouth (face landmark 13) as the trajectory anchor.
+  enableFace: true,
 });
 
 export function detectHandLandmarks(frame: Frame): HandDetectionResult | null {

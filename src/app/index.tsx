@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Camera, useCameraDevice, useCameraFormat, useCameraPermission } from 'react-native-vision-camera';
@@ -7,10 +7,8 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { SIGN_CONFIG } from '@/sign/config';
-import { ModelPicker } from '@/sign/ModelPicker';
 import { SignOverlay } from '@/sign/SignOverlay';
 import { isHandLandmarkerAvailable } from '@/sign/handLandmarks';
-import type { SignModelId } from '@/sign/models';
 import { useSignRecognition } from '@/sign/useSignRecognition';
 
 function CenterMessage({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -39,8 +37,7 @@ function CameraScreen() {
   ]);
   const fps =
     format != null ? Math.min(SIGN_CONFIG.CAMERA_FPS, format.maxFps) : SIGN_CONFIG.CAMERA_FPS;
-  const [modelId, setModelId] = useState<SignModelId>(1);
-  const { frameProcessor, detection, isReady, error } = useSignRecognition(modelId);
+  const { frameProcessor, detection, isReady, error } = useSignRecognition();
 
   useEffect(() => {
     if (!hasPermission) {
@@ -85,7 +82,6 @@ function CameraScreen() {
       <SignOverlay detection={detection} />
 
       <SafeAreaView style={styles.topBar} pointerEvents="box-none">
-        <ModelPicker modelId={modelId} onChange={setModelId} />
         {error ? (
           <ThemedText type="small" style={styles.statusText}>
             Model error: {error}
