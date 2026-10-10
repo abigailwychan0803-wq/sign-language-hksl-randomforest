@@ -1,5 +1,5 @@
 /**
- * TypeScript port of sign-language/src/sign_features.py + main2.py coordinate flow.
+ * TypeScript port of sign-language/src/sign_features.py + main2.py coordinate flow. (Another change)
  *
  * Python (main2.py):
  *   1. frame = cv2.flip(frame, 1)          — mirror BEFORE MediaPipe
