@@ -9,7 +9,7 @@ import { OnboardingProvider, resetOnboarding, useOnboarding } from '@/onboarding
 
 SplashScreen.preventAutoHideAsync();
 
-if (__DEV__) {
+if (__DEV__ && Platform.OS !== 'web') {
   const { registerDevMenuItems } = require('expo-dev-menu') as typeof import('expo-dev-menu');
 
   registerDevMenuItems([

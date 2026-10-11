@@ -26,9 +26,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.abigail.digisignhk",
-      "permissions": [
-        "android.permission.CAMERA"
-      ]
+      "permissions": ["android.permission.CAMERA"]
     },
     "web": {
       "output": "static",
@@ -77,7 +75,8 @@
           "forceCxx20": true,
           "enableOpenCLAndHexagon": true
         }
-      ]
+      ],
+      "./plugins/with-android-mediapipe-abi"
     ],
     "experiments": {
       "typedRoutes": true,

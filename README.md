@@ -48,6 +48,10 @@ npx expo prebuild --clean
 npx expo run:android
 ```
 
+## Android emulator ABI
+
+`tasks-vision` 0.10.21 has no x86_64 JNI library. On an x86_64 emulator that either aborts while loading `libmediapipe_tasks_vision_jni.so`, or segfaults inside ARM translation if the app is built as arm64. This project depends on `tasks-vision` 1.1.0, whose `tasks-core` dependency includes an x86_64 build, so `expo run:android` can target the emulator's native ABI.
+
 ## Android 16 KB page size
 
 `onnxruntime-react-native` 1.24.3 builds `libonnxruntimejsi.so` with 4 KB ELF alignment. On an Android 15+ **16 KB page size** emulator that library fails the LOAD-segment check: you get the system “isn't 16 KB compatible” dialog, then the app is killed.
