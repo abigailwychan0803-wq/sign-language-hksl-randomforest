@@ -5,6 +5,7 @@
   "dependencies": {
     "@expo/schema-utils": "~56.0.2",
     "@expo/ui": "~56.0.18",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~56.0.12",
     "expo-asset": "~56.0.17",
     "expo-constants": "~56.0.18",
@@ -19,6 +20,7 @@
     "expo-status-bar": "~56.0.4",
     "expo-symbols": "~56.0.6",
     "expo-system-ui": "~56.0.5",
+    "expo-video": "~56.1.4",
     "expo-vision-camera-v4-mediapipe": "^1.2.2",
     "expo-web-browser": "~56.0.5",
     "onnxruntime-react-native": "^1.24.3",

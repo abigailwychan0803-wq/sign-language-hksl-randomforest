@@ -67,7 +67,8 @@
       "./plugins/with-ios-hand-landmarker",
       "./plugins/with-android-hand-landmarker-performance",
       "./plugins/with-onnxruntime-android-fixes",
-      "./plugins/with-android-cmake-windows-fix"
+      "./plugins/with-android-cmake-windows-fix",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,
