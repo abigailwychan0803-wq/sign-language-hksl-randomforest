@@ -1,9 +1,10 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { useColorScheme } from 'react-native';
+import { Platform, useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { resetTranslationModel, TranslationModelProvider, useTranslationModel } from '@/llm/TranslationModelProvider';
 import { OnboardingProvider, resetOnboarding, useOnboarding } from '@/onboarding/OnboardingProvider';
 
 SplashScreen.preventAutoHideAsync();
@@ -21,20 +22,34 @@ if (__DEV__) {
       },
       shouldCollapse: true,
     },
+    {
+      name: 'Reset translation model',
+      callback: () => {
+        resetTranslationModel().then(() => {
+          console.log('Translation model flag cleared. Reload the app to download it again.');
+        });
+      },
+      shouldCollapse: true,
+    },
   ]);
 }
 
 export default function RootLayout() {
   return (
     <OnboardingProvider>
-      <RootNavigator />
+      <TranslationModelProvider>
+        <RootNavigator />
+      </TranslationModelProvider>
     </OnboardingProvider>
   );
 }
 
 function RootNavigator() {
   const colorScheme = useColorScheme();
-  const { isLoading, isComplete } = useOnboarding();
+  const { isLoading: isOnboardingLoading, isComplete } = useOnboarding();
+  const { isLoading: isModelLoading, isDownloaded } = useTranslationModel();
+  const isLoading = isOnboardingLoading || isModelLoading;
+  const needsModelDownload = Platform.OS !== 'web' && !isDownloaded;
 
   useEffect(() => {
     if (!isLoading) {
@@ -53,7 +68,10 @@ function RootNavigator() {
         <Stack.Protected guard={!isComplete}>
           <Stack.Screen name="onboarding" />
         </Stack.Protected>
-        <Stack.Protected guard={isComplete}>
+        <Stack.Protected guard={isComplete && needsModelDownload}>
+          <Stack.Screen name="model-download" />
+        </Stack.Protected>
+        <Stack.Protected guard={isComplete && !needsModelDownload}>
           <Stack.Screen name="index" />
         </Stack.Protected>
       </Stack>

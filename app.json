@@ -68,7 +68,16 @@
       "./plugins/with-android-hand-landmarker-performance",
       "./plugins/with-onnxruntime-android-fixes",
       "./plugins/with-android-cmake-windows-fix",
-      "expo-video"
+      "expo-video",
+      [
+        "llama.rn",
+        {
+          "enableEntitlements": true,
+          "entitlementsProfile": "production",
+          "forceCxx20": true,
+          "enableOpenCLAndHexagon": true
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

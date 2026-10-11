@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Camera, useCameraDevice, useCameraFormat, useCameraPermission } from 'react-native-vision-camera';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { composeSampleGloss } from '@/sign/composeGloss';
 import { SIGN_CONFIG } from '@/sign/config';
 import { ModelPicker } from '@/sign/ModelPicker';
 import { SignOverlay } from '@/sign/SignOverlay';
@@ -14,6 +15,22 @@ import type { SignModelId } from '@/sign/models';
 import { useSignRecognition } from '@/sign/useSignRecognition';
 
 function CenterMessage({ title, subtitle }: { title: string; subtitle?: string }) {
+  const [isComposing, setIsComposing] = useState(false);
+
+  async function onComposeSentence() {
+    if (isComposing) {
+      return;
+    }
+    setIsComposing(true);
+    try {
+      await composeSampleGloss();
+    } catch (composeError) {
+      console.log('[compose] failed', composeError);
+    } finally {
+      setIsComposing(false);
+    }
+  }
+
   return (
     <ThemedView style={styles.center}>
       <SafeAreaView style={styles.centerInner}>
@@ -25,6 +42,21 @@ function CenterMessage({ title, subtitle }: { title: string; subtitle?: string }
             {subtitle}
           </ThemedText>
         ) : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Compose a sentence from sample sign words"
+          disabled={isComposing}
+          onPress={onComposeSentence}
+          style={({ pressed }) => [
+            styles.composeButton,
+            pressed && styles.composePressed,
+            isComposing && styles.composeDisabled,
+          ]}
+        >
+          <ThemedText type="smallBold" style={styles.composeLabel}>
+            {isComposing ? 'Composing…' : 'Compose sentence'}
+          </ThemedText>
+        </Pressable>
       </SafeAreaView>
     </ThemedView>
   );
@@ -136,6 +168,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: Spacing.three,
     gap: Spacing.two,
+  },
+  composeButton: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.62)',
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    borderRadius: Spacing.two,
+  },
+  composeLabel: {
+    color: '#ffffff',
+  },
+  composePressed: {
+    opacity: 0.85,
+  },
+  composeDisabled: {
+    opacity: 0.6,
   },
   statusText: {
     color: '#ffffff',
