@@ -1,20 +1,29 @@
-import { useEffect, useState } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Camera, useCameraDevice, useCameraFormat, useCameraPermission } from 'react-native-vision-camera';
+import { useEffect, useState } from "react";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  Camera,
+  useCameraDevice,
+  useCameraFormat,
+  useCameraPermission,
+} from "react-native-vision-camera";
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
-import { composeSampleGloss } from '@/sign/composeGloss';
-import { SIGN_CONFIG } from '@/sign/config';
-import { ModelPicker } from '@/sign/ModelPicker';
-import { SignOverlay } from '@/sign/SignOverlay';
-import { isHandLandmarkerAvailable } from '@/sign/handLandmarks';
-import type { SignModelId } from '@/sign/models';
-import { useSignRecognition } from '@/sign/useSignRecognition';
+import { ThemedText } from "@/components/themed-text";
+import { ThemedView } from "@/components/themed-view";
+import { Spacing } from "@/constants/theme";
+import { composeSampleGloss } from "@/sign/composeGloss";
+import { SIGN_CONFIG } from "@/sign/config";
+import { isHandLandmarkerAvailable } from "@/sign/handLandmarks";
+import { SignOverlay } from "@/sign/SignOverlay";
+import { useSignRecognition } from "@/sign/useSignRecognition";
 
-function CenterMessage({ title, subtitle }: { title: string; subtitle?: string }) {
+function CenterMessage({
+  title,
+  subtitle,
+}: {
+  title: string;
+  subtitle?: string;
+}) {
   const [isComposing, setIsComposing] = useState(false);
 
   async function onComposeSentence() {
@@ -25,7 +34,7 @@ function CenterMessage({ title, subtitle }: { title: string; subtitle?: string }
     try {
       await composeSampleGloss();
     } catch (composeError) {
-      console.log('[compose] failed', composeError);
+      console.log("[compose] failed", composeError);
     } finally {
       setIsComposing(false);
     }
@@ -38,7 +47,11 @@ function CenterMessage({ title, subtitle }: { title: string; subtitle?: string }
           {title}
         </ThemedText>
         {subtitle ? (
-          <ThemedText type="default" themeColor="textSecondary" style={styles.centerTitle}>
+          <ThemedText
+            type="default"
+            themeColor="textSecondary"
+            style={styles.centerTitle}
+          >
             {subtitle}
           </ThemedText>
         ) : null}
@@ -54,7 +67,7 @@ function CenterMessage({ title, subtitle }: { title: string; subtitle?: string }
           ]}
         >
           <ThemedText type="smallBold" style={styles.composeLabel}>
-            {isComposing ? 'Composing…' : 'Compose sentence'}
+            {isComposing ? "Composing…" : "Compose sentence"}
           </ThemedText>
         </Pressable>
       </SafeAreaView>
@@ -64,15 +77,21 @@ function CenterMessage({ title, subtitle }: { title: string; subtitle?: string }
 
 function CameraScreen() {
   const { hasPermission, requestPermission } = useCameraPermission();
-  const device = useCameraDevice('front');
+  const device = useCameraDevice("front");
   const format = useCameraFormat(device, [
-    { videoResolution: { width: SIGN_CONFIG.ANALYSIS_WIDTH, height: SIGN_CONFIG.ANALYSIS_HEIGHT } },
+    {
+      videoResolution: {
+        width: SIGN_CONFIG.ANALYSIS_WIDTH,
+        height: SIGN_CONFIG.ANALYSIS_HEIGHT,
+      },
+    },
     { fps: SIGN_CONFIG.CAMERA_FPS },
   ]);
   const fps =
-    format != null ? Math.min(SIGN_CONFIG.CAMERA_FPS, format.maxFps) : SIGN_CONFIG.CAMERA_FPS;
-  const [modelId, setModelId] = useState<SignModelId>(1);
-  const { frameProcessor, detection, isReady, error } = useSignRecognition(modelId);
+    format != null
+      ? Math.min(SIGN_CONFIG.CAMERA_FPS, format.maxFps)
+      : SIGN_CONFIG.CAMERA_FPS;
+  const { frameProcessor, detection, isReady, error } = useSignRecognition();
 
   useEffect(() => {
     if (!hasPermission) {
@@ -99,7 +118,7 @@ function CameraScreen() {
   }
 
   if (device == null) {
-    return <CenterMessage title="No front camera found" />;
+    return <CenterMessage title="No back camera found" />;
   }
 
   return (
@@ -117,7 +136,6 @@ function CameraScreen() {
       <SignOverlay detection={detection} />
 
       <SafeAreaView style={styles.topBar} pointerEvents="box-none">
-        <ModelPicker modelId={modelId} onChange={setModelId} />
         {error ? (
           <ThemedText type="small" style={styles.statusText}>
             Model error: {error}
@@ -133,7 +151,7 @@ function CameraScreen() {
 }
 
 export default function HomeScreen() {
-  if (Platform.OS === 'web') {
+  if (Platform.OS === "web") {
     return (
       <CenterMessage
         title="Open on a device"
@@ -147,37 +165,37 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: "#000000",
   },
   center: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: "center",
   },
   centerInner: {
     paddingHorizontal: Spacing.four,
     gap: Spacing.three,
   },
   centerTitle: {
-    textAlign: 'center',
+    textAlign: "center",
   },
   topBar: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    alignItems: 'center',
+    alignItems: "center",
     paddingTop: Spacing.three,
     gap: Spacing.two,
   },
   composeButton: {
-    alignSelf: 'center',
-    backgroundColor: 'rgba(0,0,0,0.62)',
+    alignSelf: "center",
+    backgroundColor: "rgba(0,0,0,0.62)",
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     borderRadius: Spacing.two,
   },
   composeLabel: {
-    color: '#ffffff',
+    color: "#ffffff",
   },
   composePressed: {
     opacity: 0.85,
@@ -186,11 +204,11 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   statusText: {
-    color: '#ffffff',
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    color: "#ffffff",
+    backgroundColor: "rgba(0,0,0,0.55)",
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     borderRadius: Spacing.two,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
 });

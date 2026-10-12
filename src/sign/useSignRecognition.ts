@@ -12,7 +12,8 @@ import { SignClassifier, detectionFor } from './classifier';
 import { SIGN_CONFIG } from './config';
 import { buildFrameFeatures } from './featureEngineering';
 import { detectHandLandmarks, isHandLandmarkerAvailable } from './handLandmarks';
-import type { SignModelId } from './models';
+import { MotionWindowBuffer, handsForLabel, handsPresenceOk } from './motionRuntime';
+import type { FrameSample } from './motionWindow';
 import type { FramePayload, HandDetectionResult, SignDetection } from './types';
 
 /** Target detection rate; native VIDEO tracking keeps up better than IMAGE mode. */
@@ -62,6 +63,18 @@ function packHands(result: HandDetectionResult): { hands: number[][]; handedness
   return { hands, handedness };
 }
 
+function packMouth(result: HandDetectionResult): { x: number; y: number } | null {
+  'worklet';
+  const m = result.mouth;
+  if (m != null) return { x: m.x, y: m.y };
+  const face = result.face;
+  if (face != null && face.length > 13) {
+    const p = face[13];
+    if (p != null) return { x: p.x, y: p.y };
+  }
+  return null;
+}
+
 /** 720p analysis size, matching the sensor-landscape 16:9 camera format. */
 function analysisScale(frameWidth: number, frameHeight: number): { width: number; height: number } {
   'worklet';
@@ -72,12 +85,13 @@ function analysisScale(frameWidth: number, frameHeight: number): { width: number
   };
 }
 
-export function useSignRecognition(modelId: SignModelId) {
+export function useSignRecognition() {
   const [detection, setDetection] = useState<SignDetection | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const classifierRef = useRef<SignClassifier | null>(null);
+  const bufferRef = useRef(new MotionWindowBuffer());
   const processingRef = useRef(false);
   const pendingPayloadRef = useRef<FramePayload | null>(null);
   const logCounterRef = useRef(0);
@@ -104,6 +118,7 @@ export function useSignRecognition(modelId: SignModelId) {
     generationRef.current += 1;
     const classifier = new SignClassifier();
     classifierRef.current = null;
+    bufferRef.current.reset();
     setIsReady(false);
     setError(null);
     setDetection(null);
@@ -111,15 +126,24 @@ export function useSignRecognition(modelId: SignModelId) {
     lastDetectionAtRef.current = 0;
 
     classifier
-      .load(modelId)
+      .load()
       .then(() => {
         if (cancelled) {
           void classifier.unload();
           return;
         }
+        const sidecar = classifier.sidecar;
+        bufferRef.current.configureFromSidecar({
+          windowSeconds: sidecar.window_seconds,
+          minFrames: sidecar.min_window_frames,
+        });
         classifierRef.current = classifier;
         setIsReady(true);
-        if (SIGN_CONFIG.DEBUG) console.log(`[sign] classifier model ${modelId} loaded OK`);
+        if (SIGN_CONFIG.DEBUG) {
+          console.log(
+            `[sign] motion classifier loaded OK (n_features=${classifier.featureCount})`,
+          );
+        }
       })
       .catch((e: unknown) => {
         if (cancelled) {
@@ -133,9 +157,10 @@ export function useSignRecognition(modelId: SignModelId) {
     return () => {
       cancelled = true;
       classifierRef.current = null;
+      bufferRef.current.reset();
       void classifier.unload();
     };
-  }, [modelId]);
+  }, []);
 
   const handlePayload = useCallback((payload: FramePayload) => {
     const shouldLog =
@@ -154,11 +179,6 @@ export function useSignRecognition(modelId: SignModelId) {
       );
     }
 
-    if (payload.hands.length === 0) {
-      holdDetection();
-      return;
-    }
-
     if (processingRef.current) {
       pendingPayloadRef.current = payload;
       return;
@@ -172,38 +192,75 @@ export function useSignRecognition(modelId: SignModelId) {
       if (next != null) handlePayload(next);
     };
 
-    const { features, leftOk, rightOk, box, frame, debug } = buildFrameFeatures(payload);
+    const timestamp = Date.now() / 1000;
+    const buffer = bufferRef.current;
+    let box: { x: number; y: number; width: number; height: number } | null = null;
+    let frame = { width: payload.width, height: payload.height };
 
-    if (shouldLog) {
-      console.log(
-        `[sign] features leftOk=${leftOk} rightOk=${rightOk} leftPalm=${debug.leftPalm.toFixed(1)} rightPalm=${debug.rightPalm.toFixed(1)} box=${box ? 'yes' : 'null'}`,
-      );
+    if (payload.hands.length === 0) {
+      buffer.addEmpty(timestamp);
+    } else {
+      const built = buildFrameFeatures(payload);
+      box = built.box;
+      frame = built.frame;
+      if (shouldLog) {
+        console.log(
+          `[sign] features leftOk=${built.leftOk} rightOk=${built.rightOk} leftPalm=${built.debug.leftPalm.toFixed(1)} rightPalm=${built.debug.rightPalm.toFixed(1)} rot=${built.debug.pythonRot} mouth=${built.debug.mouth ? 'yes' : 'no'} box=${box ? 'yes' : 'null'}`,
+        );
+      }
+      const sample: FrameSample = {
+        features: built.features,
+        leftOk: built.leftOk,
+        rightOk: built.rightOk,
+        leftWrist: built.leftWrist,
+        rightWrist: built.rightWrist,
+        palmWidth: built.palmWidth,
+        anchor: built.anchor,
+        timestamp,
+      };
+      buffer.add(sample);
     }
 
-    if ((!leftOk && !rightOk) || box == null) {
+    const evaluated = buffer.evaluate();
+    if (evaluated.summary == null || !evaluated.moving) {
+      if (shouldLog) {
+        console.log(
+          `[sign] motion gate reject=${evaluated.rejectReason} buf=${buffer.size} energy=${evaluated.summary?.motionEnergy.toFixed(2) ?? '-'}`,
+        );
+      }
       holdDetection();
       finish();
       return;
     }
 
+    const summary = evaluated.summary;
     const generation = generationRef.current;
     classifier
-      .classify(features)
+      .classify(summary.vector)
       .then((outcome) => {
         if (generation !== generationRef.current) return;
         if (outcome != null && shouldLog) {
           console.log(
-            `[sign] predict top=${outcome.label} p=${outcome.confidence.toFixed(3)} margin=${outcome.margin.toFixed(3)} model=${outcome.modelPassed}`,
+            `[sign] predict top=${outcome.label} p=${outcome.confidence.toFixed(3)} margin=${outcome.margin.toFixed(3)} model=${outcome.modelPassed} energy=${summary.motionEnergy.toFixed(2)} L/R=${summary.leftRatio.toFixed(2)}/${summary.rightRatio.toFixed(2)}`,
           );
         }
-        if (outcome != null && outcome.modelPassed) {
-          const det = detectionFor(outcome.label, outcome.confidence, box, frame);
-          lastDetectionRef.current = det;
-          lastDetectionAtRef.current = Date.now();
-          setDetection(det);
-        } else {
+        if (outcome == null || !outcome.modelPassed) {
           holdDetection();
+          return;
         }
+        if (!handsPresenceOk(handsForLabel(outcome.label), summary.leftRatio, summary.rightRatio)) {
+          if (shouldLog) console.log(`[sign] hand-gate reject for ${outcome.label}`);
+          holdDetection();
+          return;
+        }
+        if (box == null) {
+          holdDetection();
+          return;
+        }
+        const det = detectionFor(outcome.label, outcome.confidence, box, frame);
+        lastDetectionRef.current = det;
+        lastDetectionAtRef.current = Date.now();
+        setDetection(det);
       })
       .catch((e: unknown) => {
         if (SIGN_CONFIG.DEBUG) console.log('[sign] classify error:', e instanceof Error ? e.message : String(e));
@@ -255,7 +312,7 @@ export function useSignRecognition(modelId: SignModelId) {
         onPayload({
           hands,
           handedness,
-          mouth: null,
+          mouth: packMouth(result),
           width: frameWidth,
           height: frameHeight,
           orientation: frameOrientation,

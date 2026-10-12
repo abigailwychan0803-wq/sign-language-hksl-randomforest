@@ -45,4 +45,4 @@ function withAndroidMediapipeAbi(config) {
   return config;
 }
 
-module.exports = createRunOncePlugin(withAndroidMediapipeAbi, 'with-android-mediapipe-abi', '2.0.0');
+module.exports = createRunOncePlugin(withAndroidMediapipeAbi, 'with-android-mediapipe-abi', '2.0.1');

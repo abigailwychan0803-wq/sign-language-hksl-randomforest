@@ -1,19 +1,18 @@
 /**
- * Loads an ONNX RandomForest and runs inference with the same confidence/margin
- * gating as the Python RuntimeSignClassifier + main.py.
+ * Loads the ONNX motion classifier and runs inference with confidence/margin gating.
  */
 import { Asset } from 'expo-asset';
-import { InferenceSession, Tensor, listSupportedBackends } from 'onnxruntime-react-native';
-import { Platform } from 'react-native';
+import { InferenceSession, Tensor } from 'onnxruntime-react-native';
 
-import { SIGN_CONFIG, TOTAL_FEATURES } from './config';
-import { SIGN_MODEL_ASSETS, type SignModelId } from './models';
+import { SIGN_CONFIG } from './config';
+import { SIGN_MODEL, type LabelSidecar } from './models';
 import type { SignColor, SignDetection } from './types';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const SIGNS_JSON = require('@/assets/model/signs.json') as {
-  classes: string[];
-  colors: number[][];
+  signs?: Array<{ label: string; color?: number[] }>;
+  classes?: string[];
+  colors?: number[][];
 };
 
 const DEFAULT_COLOR: SignColor = [255, 180, 0]; // main.py default (0,180,255) BGR -> RGB
@@ -24,13 +23,23 @@ function normalizeLabel(label: string): string {
 
 function buildColorMap(): Record<string, SignColor> {
   const map: Record<string, SignColor> = {};
+
+  if (Array.isArray(SIGNS_JSON.signs)) {
+    for (const entry of SIGNS_JSON.signs) {
+      const c = entry.color;
+      if (!Array.isArray(c) || c.length !== 3) continue;
+      map[normalizeLabel(entry.label)] = [c[2], c[1], c[0]] as SignColor;
+    }
+    return map;
+  }
+
   const { classes, colors } = SIGNS_JSON;
-  for (let i = 0; i < classes.length && i < colors.length; i++) {
-    const c = colors[i];
-    if (!Array.isArray(c) || c.length !== 3) continue;
-    // signs.json colors were authored for OpenCV (BGR); reverse to RGB so the
-    // on-screen colors match what main.py renders.
-    map[normalizeLabel(classes[i])] = [c[2], c[1], c[0]] as SignColor;
+  if (Array.isArray(classes) && Array.isArray(colors)) {
+    for (let i = 0; i < classes.length && i < colors.length; i++) {
+      const c = colors[i];
+      if (!Array.isArray(c) || c.length !== 3) continue;
+      map[normalizeLabel(classes[i])] = [c[2], c[1], c[0]] as SignColor;
+    }
   }
   return map;
 }
@@ -46,21 +55,31 @@ export function formatLabel(label: string): string {
   const n = normalizeLabel(label);
   if (n === 'iloveyou') return 'I LOVE YOU';
   if (n === 'thankyou') return 'THANK YOU';
+  if (n === 'goodnight') return 'GOOD NIGHT';
+  if (n === 'hardworking') return 'HARD WORKING';
   if (n === 'calmdown') return 'CALM DOWN';
   return label.toUpperCase();
 }
 
 export class SignClassifier {
   private session: InferenceSession | null = null;
-  private modelId: SignModelId | null = null;
   private inputName = 'input';
   private probsOutputName = 'probabilities';
   private labels: string[] = [];
-  private readonly featureBuffer = new Float32Array(TOTAL_FEATURES);
+  private nFeatures = 0;
+  private featureBuffer: Float32Array | null = null;
   private inputTensor: Tensor | null = null;
 
   get isReady(): boolean {
     return this.session != null;
+  }
+
+  get featureCount(): number {
+    return this.nFeatures;
+  }
+
+  get sidecar(): LabelSidecar {
+    return SIGN_MODEL.labels;
   }
 
   async unload(): Promise<void> {
@@ -73,57 +92,48 @@ export class SignClassifier {
       this.session = null;
     }
     this.inputTensor = null;
-    this.modelId = null;
+    this.featureBuffer = null;
     this.labels = [];
+    this.nFeatures = 0;
   }
 
-  async load(modelId: SignModelId): Promise<void> {
-    if (this.session != null && this.modelId === modelId) return;
+  async load(): Promise<void> {
+    if (this.session != null) return;
 
-    await this.unload();
-
-    const spec = SIGN_MODEL_ASSETS[modelId];
-    const sidecar = spec.labels;
-    const asset = Asset.fromModule(spec.onnx);
+    const sidecar = SIGN_MODEL.labels;
+    const asset = Asset.fromModule(SIGN_MODEL.onnx);
     if (!asset.downloaded) {
       await asset.downloadAsync();
     }
     const uri = asset.localUri ?? asset.uri;
     const path = uri.startsWith('file://') ? uri.replace('file://', '') : uri;
 
-    const available = new Set(listSupportedBackends().map((b) => b.name));
-    // TreeEnsemble (RandomForest) does not map well to NNAPI; it is often
-    // slower than CPU and can hitch the UI. Prefer XNNPACK then CPU.
-    const executionProviders: Array<'coreml' | 'xnnpack' | 'cpu'> = [];
-    if (Platform.OS === 'ios' && available.has('coreml')) {
-      executionProviders.push('coreml');
-    }
-    if (available.has('xnnpack')) {
-      executionProviders.push('xnnpack');
-    }
-    executionProviders.push('cpu');
-
+    // TreeEnsemble (RandomForest) is validated against sklearn on CPU.
+    // CoreML/XNNPACK can silently mis-run ai.onnx.ml operators.
     this.session = await InferenceSession.create(path, {
-      executionProviders,
+      executionProviders: ['cpu'],
       graphOptimizationLevel: 'all',
       enableCpuMemArena: true,
       enableMemPattern: true,
     });
     this.labels = sidecar.labels;
+    this.nFeatures = sidecar.n_features ?? sidecar.window_features ?? 0;
+    if (this.nFeatures <= 0) {
+      throw new Error('Motion model sidecar is missing n_features / window_features.');
+    }
     this.inputName = sidecar.input_name ?? this.session.inputNames[0];
     const outs = this.session.outputNames;
     this.probsOutputName = outs.includes('probabilities') ? 'probabilities' : outs[outs.length - 1];
-    this.inputTensor = new Tensor('float32', this.featureBuffer, [1, TOTAL_FEATURES]);
-    this.modelId = modelId;
+    this.featureBuffer = new Float32Array(this.nFeatures);
+    this.inputTensor = new Tensor('float32', this.featureBuffer, [1, this.nFeatures]);
   }
 
   /**
-   * Run inference on a 114-dim feature vector.
-   * Gating mirrors OnnxRuntimeSignClassifier._apply_threshold + main2.py consider().
+   * Run inference on a motion-window feature vector (171-dim for the current model).
    */
   async classify(features: Float32Array): Promise<ClassifyOutcome | null> {
-    if (this.session == null || this.inputTensor == null) return null;
-    if (features.length !== TOTAL_FEATURES) return null;
+    if (this.session == null || this.inputTensor == null || this.featureBuffer == null) return null;
+    if (features.length !== this.nFeatures) return null;
 
     this.featureBuffer.set(features);
     const output = await this.session.run({ [this.inputName]: this.inputTensor });
@@ -163,9 +173,7 @@ export interface ClassifyOutcome {
   confidence: number;
   second: number;
   margin: number;
-  /** Cleared OnnxRuntimeSignClassifier gates (0.55 + margin 0.10). */
   modelPassed: boolean;
-  /** Cleared main2.py consider / detect_and_draw gate (>= 0.6). */
   passed: boolean;
 }
 

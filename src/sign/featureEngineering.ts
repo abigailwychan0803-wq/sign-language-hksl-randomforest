@@ -9,12 +9,12 @@
  *
  * The Hand Landmarker plugin returns landmarks normalised to the raw sensor buffer
  * (e.g. 720p, orientation "landscape-left" when the phone is held portrait).
- * Face Landmarker is off; mouth_dist uses the training default 3.0 when no mouth
- * point is present. We mirror + rotate in JS to reproduce the flipped-landscape
+ * Face landmark 13 (mouth) is the motion-window anchor when the landmarker
+ * returns it. Mirror + rotate in JS to reproduce the flipped-landscape
  * upright-hand space the model was trained on, and use a separate display
  * transform for overlay boxes.
  */
-import { FEATURES_PER_HAND, SIGN_CONFIG, TOTAL_FEATURES } from './config';
+import { FEATURES_PER_HAND, FRAME_FEATURES, SIGN_CONFIG } from './config';
 import type { FramePayload } from './types';
 
 type Pt = { x: number; y: number };
@@ -288,12 +288,26 @@ function flatToPreviewPoints(
 }
 
 export interface FrameFeatures {
+  /** Dual-hand static pose vector (FRAME_FEATURES). */
   features: Float32Array;
   leftOk: boolean;
   rightOk: boolean;
+  /** Wrist in classifier pixel space, or null when that hand is invalid. */
+  leftWrist: Pt | null;
+  rightWrist: Pt | null;
+  /** Max valid palm width this frame (pixels); 0 if no valid hand. */
+  palmWidth: number;
+  /** Mouth/face anchor in classifier pixel space. */
+  anchor: Pt | null;
   box: { x: number; y: number; width: number; height: number } | null;
   frame: { width: number; height: number };
-  debug: { leftPalm: number; rightPalm: number; pythonRot: number; sensorOrientation: string };
+  debug: {
+    leftPalm: number;
+    rightPalm: number;
+    pythonRot: number;
+    sensorOrientation: string;
+    mouth: boolean;
+  };
 }
 
 /**
@@ -345,11 +359,13 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
     }
   }
 
-  const features = new Float32Array(TOTAL_FEATURES);
+  const features = new Float32Array(FRAME_FEATURES);
   let leftOk = false;
   let rightOk = false;
   let leftPalm = -1;
   let rightPalm = -1;
+  let leftWrist: Pt | null = null;
+  let rightWrist: Pt | null = null;
   const validPreviewHands: Pt[][] = [];
 
   if (leftPython != null && leftPreview != null) {
@@ -358,6 +374,7 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
     if (hf.palmWidth >= SIGN_CONFIG.MIN_PALM_WIDTH) {
       features.set(hf.vector, 0);
       leftOk = true;
+      leftWrist = { x: leftPython[0].x, y: leftPython[0].y };
       validPreviewHands.push(leftPreview);
     }
   }
@@ -367,9 +384,15 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
     if (hf.palmWidth >= SIGN_CONFIG.MIN_PALM_WIDTH) {
       features.set(hf.vector, FEATURES_PER_HAND);
       rightOk = true;
+      rightWrist = { x: rightPython[0].x, y: rightPython[0].y };
       validPreviewHands.push(rightPreview);
     }
   }
+
+  const widths: number[] = [];
+  if (leftOk && leftPalm > 0) widths.push(leftPalm);
+  if (rightOk && rightPalm > 0) widths.push(rightPalm);
+  const palmWidth = widths.length > 0 ? Math.max(...widths) : 0;
 
   const previewFrame = previewFrameSize(frameW, frameH, sensorOrientation);
   const box = boundingBox(validPreviewHands, previewFrame.width, previewFrame.height);
@@ -378,6 +401,10 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
     features,
     leftOk,
     rightOk,
+    leftWrist,
+    rightWrist,
+    palmWidth,
+    anchor: mouthPx,
     box,
     frame: previewFrame,
     debug: {
@@ -385,6 +412,7 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
       rightPalm,
       pythonRot: pythonRotationDeg(classOrientation),
       sensorOrientation,
+      mouth: mouthPx != null,
     },
   };
 }

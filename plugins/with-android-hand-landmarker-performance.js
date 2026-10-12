@@ -56,7 +56,7 @@ function kotlinSource(packageName, opts) {
     ? `
             try {
                 faceLandmarker = createFaceLandmarker(gpu, video)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.w(TAG, "face create failed: " + e.message)
             }
 `
@@ -71,7 +71,7 @@ function kotlinSource(packageName, opts) {
     ? `
             try {
                 faceLandmarker = createFaceLandmarker(gpu = false, video = false)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.w(TAG, "face CPU IMAGE fallback failed: " + e.message)
             }
 `
@@ -188,7 +188,7 @@ ${faceDetect.replace('output["mouth"]', 'packed["mouth"]')}
             Pair(false, true),
             Pair(false, false),
         )
-        var lastError: Exception? = null
+        var lastError: Throwable? = null
         for ((gpu, video) in attempts) {
             try {
                 handLandmarker = createLandmarker(gpu, video)
@@ -196,7 +196,7 @@ ${faceDetect.replace('output["mouth"]', 'packed["mouth"]')}
 ${faceEnsure}
                 Log.d(TAG, "created landmarker gpu=" + gpu + " video=" + video)
                 return
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 lastError = e
                 Log.w(TAG, "create failed gpu=" + gpu + " video=" + video + ": " + e.message)
             }
@@ -214,7 +214,7 @@ ${faceClose}
             initError = null
 ${faceFallback}
             Log.d(TAG, "fell back to CPU IMAGE")
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             initError = e.message
             Log.e(TAG, "CPU IMAGE fallback failed: " + e.message, e)
         }
