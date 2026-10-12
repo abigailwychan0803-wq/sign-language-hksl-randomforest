@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import {
   Camera,
   useCameraDevice,
+  useCameraDevices,
   useCameraFormat,
   useCameraPermission,
 } from "react-native-vision-camera";
@@ -77,7 +78,12 @@ function CenterMessage({
 
 function CameraScreen() {
   const { hasPermission, requestPermission } = useCameraPermission();
-  const device = useCameraDevice("front");
+  const devices = useCameraDevices();
+  const frontDevice = useCameraDevice("front");
+  const backDevice = useCameraDevice("back");
+  // Prefer front (selfie) for signing; fall back to back — Android emulators
+  // often ship without a front camera even when the Camera app works.
+  const device = frontDevice ?? backDevice;
   const format = useCameraFormat(device, [
     {
       videoResolution: {
@@ -99,6 +105,21 @@ function CameraScreen() {
     }
   }, [hasPermission, requestPermission]);
 
+  useEffect(() => {
+    if (devices.length === 0) {
+      return;
+    }
+    console.log(
+      "[camera] devices",
+      devices.map((d) => ({
+        id: d.id,
+        position: d.position,
+        name: d.name,
+        physicalDevices: d.physicalDevices,
+      })),
+    );
+  }, [devices]);
+
   if (!isHandLandmarkerAvailable) {
     return (
       <CenterMessage
@@ -117,8 +138,24 @@ function CameraScreen() {
     );
   }
 
+  // VisionCamera may briefly report [] while ProcessCameraProvider initializes.
+  if (devices.length === 0) {
+    return (
+      <CenterMessage
+        title="Looking for camera…"
+        subtitle="Initializing camera devices."
+      />
+    );
+  }
+
   if (device == null) {
-    return <CenterMessage title="No back camera found" />;
+    const positions = devices.map((d) => d.position).join(", ") || "none";
+    return (
+      <CenterMessage
+        title="No camera found"
+        subtitle={`VisionCamera sees ${devices.length} device(s): ${positions}. On an emulator, enable a virtual camera under Extended controls → Camera.`}
+      />
+    );
   }
 
   return (
