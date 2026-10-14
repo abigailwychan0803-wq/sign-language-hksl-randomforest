@@ -47,6 +47,12 @@ export interface FramePayload {
   height: number;
   /** Frame orientation reported by VisionCamera ("portrait" | "landscape-left" | ...). */
   orientation: string;
+  /**
+   * VisionCamera Frame.isMirrored — true for typical front-camera buffers that
+   * are already selfie-mirrored. When true, classifier must NOT apply FLIP_X
+   * again (that would double-mirror vs Python's single cv2.flip).
+   */
+  isMirrored: boolean;
   /** Error reported by the native plugin, if any. */
   error?: string;
 }

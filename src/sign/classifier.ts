@@ -145,26 +145,33 @@ export class SignClassifier {
   }
 
   private applyThreshold(probs: Float32Array | number[]): ClassifyOutcome {
-    let bestIdx = 0;
-    let best = -Infinity;
-    let second = -Infinity;
+    const ranked: Array<{ idx: number; p: number }> = [];
     for (let i = 0; i < probs.length; i++) {
-      const v = probs[i] as number;
-      if (v > best) {
-        second = best;
-        best = v;
-        bestIdx = i;
-      } else if (v > second) {
-        second = v;
-      }
+      ranked.push({ idx: i, p: probs[i] as number });
     }
-    if (second === -Infinity) second = 0;
+    ranked.sort((a, b) => b.p - a.p);
 
+    const bestIdx = ranked[0]?.idx ?? 0;
+    const best = ranked[0]?.p ?? 0;
+    const second = ranked[1]?.p ?? 0;
     const margin = best - second;
     const modelPassed = best >= SIGN_CONFIG.MIN_CONFIDENCE && margin >= SIGN_CONFIG.MARGIN;
     const passed = modelPassed && best >= SIGN_CONFIG.DISPLAY_CONFIDENCE;
 
-    return { label: this.labels[bestIdx], confidence: best, second, margin, modelPassed, passed };
+    const top3 = ranked.slice(0, 3).map((r) => ({
+      label: this.labels[r.idx] ?? `idx${r.idx}`,
+      p: r.p,
+    }));
+
+    return {
+      label: this.labels[bestIdx],
+      confidence: best,
+      second,
+      margin,
+      modelPassed,
+      passed,
+      top3,
+    };
   }
 }
 
@@ -175,6 +182,7 @@ export interface ClassifyOutcome {
   margin: number;
   modelPassed: boolean;
   passed: boolean;
+  top3: Array<{ label: string; p: number }>;
 }
 
 export function detectionFor(

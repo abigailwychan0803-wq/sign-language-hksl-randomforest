@@ -59,7 +59,7 @@
           "minDetectionConfidence": 0.5,
           "minPresenceConfidence": 0.5,
           "minTrackingConfidence": 0.5,
-          "enableFace": false
+          "enableFace": true
         }
       ],
       "./plugins/with-ios-hand-landmarker",

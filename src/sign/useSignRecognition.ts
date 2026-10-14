@@ -103,6 +103,7 @@ export function useSignRecognition() {
   const logCounterRef = useRef(0);
   const lastDetectionRef = useRef<SignDetection | null>(null);
   const lastDetectionAtRef = useRef(0);
+  const lastHandAtRef = useRef(0);
   const generationRef = useRef(0);
   const { resize } = useResizePlugin();
 
@@ -181,7 +182,8 @@ export function useSignRecognition() {
 
     if (shouldLog) {
       console.log(
-        `[sign] frame ${payload.width}x${payload.height} orient=${payload.orientation} hands=${payload.hands.length}` +
+        `[sign] frame ${payload.width}x${payload.height} orient=${payload.orientation}` +
+          ` mirrored=${payload.isMirrored} hands=${payload.hands.length}` +
           (payload.error ? ` pluginError=${payload.error}` : ''),
       );
     }
@@ -205,9 +207,14 @@ export function useSignRecognition() {
     let frame = { width: payload.width, height: payload.height };
 
     if (payload.hands.length === 0) {
-      buffer.addEmpty(timestamp);
+      // Brief tracking gaps: skip empties so presence ratios stay usable.
+      const sinceHand = Date.now() - lastHandAtRef.current;
+      if (sinceHand >= SIGN_CONFIG.EMPTY_FRAME_GRACE_MS) {
+        buffer.addEmpty(timestamp);
+      }
       setLandmarks(null);
     } else {
+      lastHandAtRef.current = Date.now();
       const built = buildFrameFeatures(payload);
       box = built.box;
       frame = built.frame;
@@ -218,7 +225,14 @@ export function useSignRecognition() {
       );
       if (shouldLog) {
         console.log(
-          `[sign] features leftOk=${built.leftOk} rightOk=${built.rightOk} leftPalm=${built.debug.leftPalm.toFixed(1)} rightPalm=${built.debug.rightPalm.toFixed(1)} rot=${built.debug.pythonRot} mouth=${built.debug.mouth ? 'yes' : 'no'} box=${box ? 'yes' : 'null'}`,
+          `[sign] features leftOk=${built.leftOk} rightOk=${built.rightOk}` +
+            ` leftPalm=${built.debug.leftPalm.toFixed(1)} rightPalm=${built.debug.rightPalm.toFixed(1)}` +
+            ` leftVal=${built.debug.leftValidity.toFixed(1)} rightVal=${built.debug.rightValidity.toFixed(1)}` +
+            ` sensor=${built.debug.sensorOrientation} classOrient=${built.debug.classOrientation}` +
+            ` mirrored=${built.debug.isMirrored} flipX=${built.debug.flipX}` +
+            ` open=${built.debug.openCount.toFixed(0)} upright=${built.debug.palmUpright.toFixed(2)}` +
+            ` mouthDist=${built.debug.mouthDist.toFixed(2)}` +
+            ` mouth=${built.debug.mouth ? 'yes' : 'no'} box=${box ? 'yes' : 'null'}`,
         );
       }
       const sample: FrameSample = {
@@ -247,17 +261,38 @@ export function useSignRecognition() {
     }
 
     const summary = evaluated.summary;
+    // No vocabulary entry can pass the hand-presence gate if both ratios are low.
+    if (Math.max(summary.leftRatio, summary.rightRatio) < SIGN_CONFIG.MIN_PRESENCE_RATIO) {
+      if (shouldLog) {
+        console.log(
+          `[sign] presence gate L/R=${summary.leftRatio.toFixed(2)}/${summary.rightRatio.toFixed(2)}` +
+            ` energy=${summary.motionEnergy.toFixed(2)} (need max>=${SIGN_CONFIG.MIN_PRESENCE_RATIO})`,
+        );
+      }
+      holdDetection();
+      finish();
+      return;
+    }
+
     const generation = generationRef.current;
     classifier
       .classify(summary.vector)
       .then((outcome) => {
         if (generation !== generationRef.current) return;
         if (outcome != null && shouldLog) {
+          const top3 = outcome.top3
+            .map((t) => `${t.label}:${t.p.toFixed(3)}`)
+            .join(' ');
           console.log(
-            `[sign] predict top=${outcome.label} p=${outcome.confidence.toFixed(3)} margin=${outcome.margin.toFixed(3)} model=${outcome.modelPassed} energy=${summary.motionEnergy.toFixed(2)} L/R=${summary.leftRatio.toFixed(2)}/${summary.rightRatio.toFixed(2)}`,
+            `[sign] predict top=${outcome.label} p=${outcome.confidence.toFixed(3)}` +
+              ` margin=${outcome.margin.toFixed(3)} model=${outcome.modelPassed}` +
+              ` display=${outcome.passed} energy=${summary.motionEnergy.toFixed(2)}` +
+              ` L/R=${summary.leftRatio.toFixed(2)}/${summary.rightRatio.toFixed(2)}` +
+              ` top3=[${top3}]`,
           );
         }
-        if (outcome == null || !outcome.modelPassed) {
+        // Match Python detect_and_draw conf >= 0.6 (DISPLAY_CONFIDENCE) via outcome.passed.
+        if (outcome == null || !outcome.passed) {
           holdDetection();
           return;
         }
@@ -306,6 +341,7 @@ export function useSignRecognition() {
         const frameWidth = frame.width;
         const frameHeight = frame.height;
         const frameOrientation = frame.orientation;
+        const frameMirrored = frame.isMirrored === true;
 
         const result = detectHandLandmarks(frame);
         if (result == null) {
@@ -316,6 +352,7 @@ export function useSignRecognition() {
             width: frameWidth,
             height: frameHeight,
             orientation: frameOrientation,
+            isMirrored: frameMirrored,
           });
           return;
         }
@@ -329,6 +366,7 @@ export function useSignRecognition() {
           width: frameWidth,
           height: frameHeight,
           orientation: frameOrientation,
+          isMirrored: frameMirrored,
           error: result.error,
         });
       });

@@ -3,6 +3,8 @@
  *   - GPU delegate created on the frame-processor thread (required by MediaPipe)
  *   - VIDEO tracking with IMAGE + CPU fallbacks
  *   - Face Landmarker off unless enableFace is set in app.json
+ *   - Face always on CPU (avoids dual-GPU OOM/crash with Hand on GPU)
+ *   - MediaPipe rotationDegrees forced to 0; JS owns upright unwrap
  *   - Compact handedness labels plus the original nested handedness payload
  *
  * Runs after expo-vision-camera-v4-mediapipe during prebuild.
@@ -32,13 +34,18 @@ function kotlinSource(packageName, opts) {
   const faceImport = enableFace
     ? 'import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker\n'
     : '';
-  const faceField = enableFace ? '    private var faceLandmarker: FaceLandmarker? = null\n' : '';
+  const faceFields = enableFace
+    ? `    private var faceLandmarker: FaceLandmarker? = null
+    private var faceRunningVideo: Boolean = false
+`
+    : '';
   const faceCreate = enableFace
     ? `
-    private fun createFaceLandmarker(gpu: Boolean, video: Boolean): FaceLandmarker {
+    /** Face always uses CPU to avoid dual-GPU crashes alongside Hand Landmarker. */
+    private fun createFaceLandmarker(video: Boolean): FaceLandmarker {
         val base = BaseOptions.builder()
             .setModelAssetPath("face_landmarker.task")
-            .setDelegate(if (gpu) Delegate.GPU else Delegate.CPU)
+            .setDelegate(Delegate.CPU)
             .build()
         val options = FaceLandmarker.FaceLandmarkerOptions.builder()
             .setBaseOptions(base)
@@ -50,46 +57,61 @@ function kotlinSource(packageName, opts) {
             .build()
         return FaceLandmarker.createFromOptions(appContext, options)
     }
+
+    private fun ensureFaceLandmarker(video: Boolean) {
+        if (faceLandmarker != null) return
+        try {
+            faceLandmarker = createFaceLandmarker(video)
+            faceRunningVideo = video
+            Log.d(TAG, "created face landmarker cpu video=" + video)
+        } catch (e: Throwable) {
+            Log.w(TAG, "face create failed (hands continue): " + e.message)
+            faceLandmarker = null
+        }
+    }
 `
     : '';
   const faceEnsure = enableFace
     ? `
-            try {
-                faceLandmarker = createFaceLandmarker(gpu, video)
-            } catch (e: Throwable) {
-                Log.w(TAG, "face create failed: " + e.message)
-            }
+                ensureFaceLandmarker(video)
 `
     : '';
   const faceClose = enableFace
     ? `
             try { faceLandmarker?.close() } catch (_: Exception) {}
             faceLandmarker = null
+            faceRunningVideo = false
 `
     : '';
   const faceFallback = enableFace
     ? `
             try {
-                faceLandmarker = createFaceLandmarker(gpu = false, video = false)
+                faceLandmarker = createFaceLandmarker(video = false)
+                faceRunningVideo = false
             } catch (e: Throwable) {
                 Log.w(TAG, "face CPU IMAGE fallback failed: " + e.message)
+                faceLandmarker = null
             }
 `
     : '';
   const faceDetect = enableFace
     ? `
             faceLandmarker?.let { fl ->
-                val faceResult = if (runningVideo) {
-                    fl.detectForVideo(mpImage, imageProcessingOptions, lastTimestampMs)
-                } else {
-                    fl.detect(mpImage, imageProcessingOptions)
-                }
-                if (faceResult.faceLandmarks().isNotEmpty()) {
-                    val mouth = faceResult.faceLandmarks()[0][13]
-                    output["mouth"] = hashMapOf(
-                        "x" to mouth.x().toDouble(),
-                        "y" to mouth.y().toDouble()
-                    )
+                try {
+                    val faceResult = if (faceRunningVideo) {
+                        fl.detectForVideo(mpImage, imageProcessingOptions, lastTimestampMs)
+                    } else {
+                        fl.detect(mpImage, imageProcessingOptions)
+                    }
+                    if (faceResult.faceLandmarks().isNotEmpty()) {
+                        val mouth = faceResult.faceLandmarks()[0][13]
+                        packed["mouth"] = hashMapOf(
+                            "x" to mouth.x().toDouble(),
+                            "y" to mouth.y().toDouble()
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "face detect failed: " + e.message)
                 }
             }
 `
@@ -109,8 +131,7 @@ import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
-${faceImport}import com.mrousavy.camera.core.types.Orientation
-import com.mrousavy.camera.frameprocessors.Frame
+${faceImport}import com.mrousavy.camera.frameprocessors.Frame
 import com.mrousavy.camera.frameprocessors.FrameProcessorPlugin
 import com.mrousavy.camera.frameprocessors.VisionCameraProxy
 
@@ -119,6 +140,10 @@ import com.mrousavy.camera.frameprocessors.VisionCameraProxy
  *
  * GPU must be created and used on that same thread. VIDEO mode is preferred for
  * tracking; IMAGE mode is the proven fallback.
+ *
+ * Landmarks stay in VisionCamera sensor-buffer space (rotationDegrees=0). JS owns
+ * the portrait unwrap for overlay and classifier. Applying ImageProcessingOptions
+ * rotation here made landmark space ambiguous and broke the skeleton overlay.
  */
 class HandLandmarkerPlugin(
     proxy: VisionCameraProxy,
@@ -131,7 +156,7 @@ class HandLandmarkerPlugin(
 
     private val appContext: Context = proxy.context
     private var handLandmarker: HandLandmarker? = null
-${faceField}    private var runningVideo: Boolean = true
+${faceFields}    private var runningVideo: Boolean = true
     private var initError: String? = null
     private var lastTimestampMs: Long = 0
     private var detectFallbackUsed: Boolean = false
@@ -148,21 +173,18 @@ ${faceField}    private var runningVideo: Boolean = true
         var mpImage: MPImage? = null
         try {
             val mediaImage: Image = frame.image
-            mpImage = MediaImageBuilder(mediaImage).build()
+            val image = MediaImageBuilder(mediaImage).build()
+            mpImage = image
 
-            val rotationDegrees = when (frame.orientation) {
-                Orientation.PORTRAIT -> 0
-                Orientation.LANDSCAPE_RIGHT -> 90
-                Orientation.PORTRAIT_UPSIDE_DOWN -> 180
-                Orientation.LANDSCAPE_LEFT -> 270
-            }
+            // Keep rotation at 0 so landmarks stay in VisionCamera sensor-buffer
+            // space. JS owns the portrait unwrap (same path as the skeleton overlay).
             val imageProcessingOptions = ImageProcessingOptions.builder()
-                .setRotationDegrees(rotationDegrees)
+                .setRotationDegrees(0)
                 .build()
 
-            val result = detect(mpImage, imageProcessingOptions)
+            val result = detect(image, imageProcessingOptions)
             val packed = packResult(result)
-${faceDetect.replace('output["mouth"]', 'packed["mouth"]')}
+${faceDetect.replace(/mpImage/g, 'image')}
             return packed
         } catch (e: Exception) {
             Log.e(TAG, "detect failed (video=" + runningVideo + "): " + e.message, e)

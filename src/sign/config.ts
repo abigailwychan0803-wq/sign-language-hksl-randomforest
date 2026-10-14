@@ -5,65 +5,74 @@
  *   frame = cv2.flip(frame, 1)   # mirror BEFORE MediaPipe Holistic
  *   hand_to_pixels: x * w, y * h on the flipped buffer (no extra rotation)
  *
- * On Android, Hand Landmarker landmarks behave like VisionCamera sensor-buffer
- * coordinates (landscape when the phone is held portrait). Overlay unwraps
- * that into preview space; classifier features flip + rotate into the same
- * upright layout Python trains on.
+ * Android Hand Landmarker uses rotationDegrees=0 (sensor-buffer landmarks).
+ * JS unwraps landscape→portrait for overlay + classifier; classifier then
+ * applies FLIP_X for Python selfie-mirror parity.
  */
 export const SIGN_CONFIG = {
   /**
-   * Orientation fed to PYTHON_ROTATION when it is "auto". "portrait" forces a
-   * stable 90° classifier rotation on portrait-held phones even if the sensor
-   * reports landscape-left.
+   * false = landmarks are in sensor-buffer space; JS applies landscape unwrap.
+   * true only if native MediaPipe already rotated to upright (do not combine).
    */
-  ORIENTATION: "portrait" as
+  LANDMARKS_ARE_UPRIGHT: false,
+  /**
+   * Sensor orientation source for the shared upright unwrap.
+   */
+  ORIENTATION: "auto" as
     | "auto"
     | "portrait"
     | "landscape-left"
     | "landscape-right"
     | "portrait-upside-down",
-  /** Mirror x — matches cv2.flip(frame, 1) before MediaPipe in Python. */
+  /**
+   * Target Python's cv2.flip mirrored space. Skipped when Frame.isMirrored is
+   * already true so we do not double-mirror.
+   */
   FLIP_X: true,
   /**
-   * Mirror x in overlay space. VisionCamera's preview is not mirrored by default
-   * on Android (unlike many stock camera apps), so keep this false unless you
-   * also set Camera isMirrored.
+   * Mirror x in overlay space. Keep false unless Camera isMirrored is also set.
    */
   MIRROR_PREVIEW: false,
   /**
-   * Hand Landmarker labels anatomical Left/Right on the unflipped buffer.
-   * Python Holistic also uses anatomical slots, so do NOT swap after JS flip.
+   * Hand Landmarker Left/Right are anatomical; do not swap after flip.
    */
   SWAP_HANDEDNESS: false,
   /**
-   * Clockwise rotation for classifier features (sensor buffer → upright hands).
-   * Overlay uses a separate sensor→preview unwrap; keep these in sync empirically.
+   * Skip buffering empty frames for this long after the last hand (ms).
    */
-  PYTHON_ROTATION: 90 as 0 | 90 | 180 | 270 | "auto",
+  EMPTY_FRAME_GRACE_MS: 400,
   /** How long (ms) to keep the last box visible after hands drop or a frame fails. */
   DETECTION_HOLD_MS: 400,
-  /** Minimum palm width in pixels (sign_features min_palm_width). */
+  /** Minimum palm / validity scale in pixels (sign_features min_palm_width). */
   MIN_PALM_WIDTH: 40,
   /** Bounding-box padding (main.py bounding_box pad). */
   BOX_PAD: 16,
-  /** OnnxRuntimeSignClassifier min_confidence (main.py: 0.55). */
-  MIN_CONFIDENCE: 0.55,
-  /** OnnxRuntimeSignClassifier margin (main.py: 0.10). */
-  MARGIN: 0.1,
-  /** detect_and_draw / consider gate (main.py: 0.6). */
-  DISPLAY_CONFIDENCE: 0.6,
+  /**
+   * Mobile close-up / Hand Landmarker domain shift yields lower RF probabilities
+   * than the webcam Holistic path in main.py (0.55 / 0.10 / 0.6). Keep top-1
+   * goodbye (~0.35–0.40) displayable while still rejecting flat noise.
+   */
+  MIN_CONFIDENCE: 0.3,
+  /** Min gap vs second-best (main.py: 0.10). */
+  MARGIN: 0.02,
+  /** UI draw gate — same floor as MIN_CONFIDENCE on mobile. */
+  DISPLAY_CONFIDENCE: 0.3,
   /** Rolling window length for motion features (sign_features.WINDOW_SECONDS). */
   WINDOW_SECONDS: 1.0,
   /** Minimum buffered frames before motion inference (MIN_WINDOW_FRAMES). */
   MIN_WINDOW_FRAMES: 8,
-  /** Wrist speed (palm widths/sec) to treat the window as moving. */
-  MOTION_ENERGY_THRESHOLD: 1.0,
+  /**
+   * Wrist speed (palm widths/sec). Phone close-ups have larger palms so the
+   * same physical wave yields lower palm/s than a webcam — use 0.5 vs Python 1.0.
+   */
+  MOTION_ENERGY_THRESHOLD: 0.5,
   /** Hand-presence gate shared with clip capture (MIN_PRESENCE_RATIO). */
   MIN_PRESENCE_RATIO: 0.6,
   /** Cap on buffered frames (RuntimeMotionClassifier.MAX_BUFFERED_FRAMES). */
   MAX_BUFFERED_FRAMES: 120,
-  DEBUG: false,
-  DEBUG_THROTTLE: 30,
+  /** Log mouth/orientation/top-3 while validating mobile parity. */
+  DEBUG: true,
+  DEBUG_THROTTLE: 15,
   /** Camera + MediaPipe analysis cap (sensor landscape 16:9). */
   ANALYSIS_WIDTH: 1280,
   ANALYSIS_HEIGHT: 720,

@@ -7,11 +7,18 @@
  *   3. hand_to_pixels: x * w, y * h        — w = shape[1], h = shape[0], NO rotation
  *   4. build_frame_features(left_slot, right_slot, face, image.shape)
  *
- * Android landmarks arrive in VisionCamera sensor-buffer space (often landscape
- * while the phone is held portrait). Overlay unwraps that into the portrait
- * preview; classifier features flip + rotate into Python's upright layout.
+ * Android: MediaPipe rotationDegrees=0 → sensor-buffer landmarks; JS unwraps
+ * landscape→portrait for overlay + classifier, then optional FLIP_X.
+ * (Do not also rotate in native — that double-rotates the skeleton.)
  */
-import { FEATURES_PER_HAND, FRAME_FEATURES, SIGN_CONFIG } from './config';
+import {
+  FEATURES_PER_HAND,
+  FRAME_FEATURES,
+  IDX_MOUTH_DIST,
+  IDX_OPEN_COUNT,
+  IDX_PALM_UPRIGHT,
+  SIGN_CONFIG,
+} from './config';
 import type { FramePayload } from './types';
 
 type Pt = { x: number; y: number };
@@ -37,54 +44,20 @@ function angle(a: Pt, b: Pt, c: Pt): number {
   return Math.acos(dot);
 }
 
-/** Clockwise rotation in normalised [0,1]² (origin top-left, y down). */
-function rotateNorm(nx: number, ny: number, deg: number): [number, number] {
-  switch (deg) {
-    case 90:
-      return [1 - ny, nx];
-    case 180:
-      return [1 - nx, 1 - ny];
-    case 270:
-      return [ny, 1 - nx];
-    default:
-      return [nx, ny];
-  }
-}
-
 /** Resolved frame orientation (config override or sensor-reported). */
 function effectiveOrientation(reported: string): string {
   return SIGN_CONFIG.ORIENTATION === 'auto' ? reported : SIGN_CONFIG.ORIENTATION;
 }
 
 /**
- * Classifier rotation that maps sensor-buffer landmarks into the upright-hand
- * layout Python sees on a flipped landscape webcam frame.
+ * Preview / upright surface size for a VisionCamera frame (sensor landscape → portrait).
  */
-function pythonRotationDeg(orientation: string): number {
-  const cfg = SIGN_CONFIG.PYTHON_ROTATION;
-  if (cfg === 0 || cfg === 90 || cfg === 180 || cfg === 270) return cfg;
-  switch (orientation) {
-    case 'landscape-left':
-      return 90;
-    case 'landscape-right':
-      return 270;
-    case 'portrait-upside-down':
-      return 180;
-    case 'portrait':
-    default:
-      return 0;
-  }
-}
-
-/**
- * Preview surface size for a VisionCamera frame (sensor landscape → portrait).
- */
-function previewFrameSize(
+function uprightFrameSize(
   frameW: number,
   frameH: number,
-  sensorOrientation: string,
+  orientation: string,
 ): { width: number; height: number } {
-  switch (sensorOrientation) {
+  switch (orientation) {
     case 'landscape-left':
     case 'landscape-right':
       return { width: frameH, height: frameW };
@@ -94,8 +67,27 @@ function previewFrameSize(
 }
 
 /**
+ * Map normalised landmarks into upright [0,1]² (origin top-left, y down).
+ * When LANDMARKS_ARE_UPRIGHT, native MediaPipe already rotated — identity only.
+ */
+function toUprightNorm(nx: number, ny: number, orientation: string): [number, number] {
+  if (SIGN_CONFIG.LANDMARKS_ARE_UPRIGHT) {
+    return [nx, ny];
+  }
+  switch (orientation) {
+    case 'landscape-left':
+      return [ny, 1 - nx];
+    case 'landscape-right':
+      return [1 - ny, nx];
+    case 'portrait-upside-down':
+      return [1 - nx, 1 - ny];
+    default:
+      return [nx, ny];
+  }
+}
+
+/**
  * Map a sensor-normalised landmark to portrait preview pixels.
- * Uses the sensor-reported orientation so the skeleton matches the camera view.
  */
 function toPreviewPixel(
   nx: number,
@@ -104,37 +96,24 @@ function toPreviewPixel(
   frameH: number,
   sensorOrientation: string,
 ): Pt {
-  const { width: pW, height: pH } = previewFrameSize(frameW, frameH, sensorOrientation);
-
-  let u: number;
-  let v: number;
-  switch (sensorOrientation) {
-    case 'landscape-left':
-      u = ny;
-      v = 1 - nx;
-      break;
-    case 'landscape-right':
-      u = 1 - ny;
-      v = nx;
-      break;
-    case 'portrait-upside-down':
-      u = 1 - nx;
-      v = 1 - ny;
-      break;
-    default:
-      u = nx;
-      v = ny;
-      break;
-  }
-
+  const { width: pW, height: pH } = uprightFrameSize(frameW, frameH, sensorOrientation);
+  let [u, v] = toUprightNorm(nx, ny, sensorOrientation);
   if (SIGN_CONFIG.MIRROR_PREVIEW) u = 1 - u;
-
   return { x: u * pW, y: v * pH };
 }
 
 /**
- * sign_features.hand_to_pixels on the Python-equivalent frame.
- * Order: mirror (cv2.flip) → rotate → x*w, y*h with sensor w/h.
+ * Whether to apply an extra horizontal flip to reach Python's cv2.flip space.
+ * Front-camera buffers are often already mirrored (Frame.isMirrored); flipping
+ * again double-mirrors and collapses motion-class confidence.
+ */
+function shouldFlipForPython(isMirrored: boolean): boolean {
+  return SIGN_CONFIG.FLIP_X && !isMirrored;
+}
+
+/**
+ * sign_features.hand_to_pixels on the Python-equivalent upright mirrored frame.
+ * Shared upright unwrap with the overlay, optional FLIP_X, then × upright W/H.
  */
 function toPythonPixel(
   nx: number,
@@ -142,11 +121,12 @@ function toPythonPixel(
   frameW: number,
   frameH: number,
   orientation: string,
+  flipX: boolean,
 ): Pt {
-  if (SIGN_CONFIG.FLIP_X) nx = 1 - nx;
-  const rot = pythonRotationDeg(orientation);
-  const [rx, ry] = rotateNorm(nx, ny, rot);
-  return { x: rx * frameW, y: ry * frameH };
+  const { width: pW, height: pH } = uprightFrameSize(frameW, frameH, orientation);
+  let [u, v] = toUprightNorm(nx, ny, orientation);
+  if (flipX) u = 1 - u;
+  return { x: u * pW, y: v * pH };
 }
 
 function fingerStates(p: Pt[], handedness: 'left' | 'right'): FingerStates {
@@ -191,6 +171,18 @@ interface FingerStates {
 interface HandFeatures {
   vector: Float32Array;
   palmWidth: number;
+  /** Python _hand_validity_scale — gate only, not fed to the classifier. */
+  validityScale: number;
+}
+
+/** sign_features._hand_validity_scale */
+function handValidityScale(p: Pt[], palmWidth: number): number {
+  const wrist = p[0];
+  const middleMcp = p[9];
+  const middleTip = p[12];
+  const palmHeight = norm(wrist.x - middleMcp.x, wrist.y - middleMcp.y);
+  const fingerSpan = norm(wrist.x - middleTip.x, wrist.y - middleTip.y);
+  return Math.max(palmWidth, palmHeight, fingerSpan, EPS);
 }
 
 /** sign_features.build_hand_features */
@@ -203,6 +195,7 @@ function buildHandFeatures(
   const indexMcp = p[5];
   const pinkyMcp = p[17];
   const palmWidth = Math.max(norm(indexMcp.x - pinkyMcp.x, indexMcp.y - pinkyMcp.y), EPS);
+  const validityScale = handValidityScale(p, palmWidth);
 
   const vector = new Float32Array(FEATURES_PER_HAND);
   let o = 0;
@@ -258,7 +251,7 @@ function buildHandFeatures(
   vector[o++] = palmUpright;
   vector[o++] = mouthDist;
 
-  return { vector, palmWidth };
+  return { vector, palmWidth, validityScale };
 }
 
 function parseHandedness(raw: string): 'left' | 'right' | null {
@@ -268,10 +261,16 @@ function parseHandedness(raw: string): 'left' | 'right' | null {
   return null;
 }
 
-function flatToPythonPoints(flat: number[], frameW: number, frameH: number, orientation: string): Pt[] {
+function flatToPythonPoints(
+  flat: number[],
+  frameW: number,
+  frameH: number,
+  orientation: string,
+  flipX: boolean,
+): Pt[] {
   const pts: Pt[] = new Array(21);
   for (let i = 0; i < 21; i++) {
-    pts[i] = toPythonPixel(flat[i * 3], flat[i * 3 + 1], frameW, frameH, orientation);
+    pts[i] = toPythonPixel(flat[i * 3], flat[i * 3 + 1], frameW, frameH, orientation, flipX);
   }
   return pts;
 }
@@ -308,9 +307,16 @@ export interface FrameFeatures {
   debug: {
     leftPalm: number;
     rightPalm: number;
-    pythonRot: number;
+    leftValidity: number;
+    rightValidity: number;
     sensorOrientation: string;
+    classOrientation: string;
     mouth: boolean;
+    isMirrored: boolean;
+    flipX: boolean;
+    openCount: number;
+    palmUpright: number;
+    mouthDist: number;
   };
 }
 
@@ -322,10 +328,19 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
   const frameH = payload.height;
   const classOrientation = effectiveOrientation(payload.orientation);
   const sensorOrientation = payload.orientation;
+  const isMirrored = payload.isMirrored === true;
+  const flipX = shouldFlipForPython(isMirrored);
 
   let mouthPx: Pt | null = null;
   if (payload.mouth != null) {
-    mouthPx = toPythonPixel(payload.mouth.x, payload.mouth.y, frameW, frameH, classOrientation);
+    mouthPx = toPythonPixel(
+      payload.mouth.x,
+      payload.mouth.y,
+      frameW,
+      frameH,
+      classOrientation,
+      flipX,
+    );
   }
 
   // Holistic slots: left_hand_landmarks / right_hand_landmarks (anatomical).
@@ -344,7 +359,7 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
       slot = slot === 'left' ? 'right' : 'left';
     }
 
-    const pyPts = flatToPythonPoints(flat, frameW, frameH, classOrientation);
+    const pyPts = flatToPythonPoints(flat, frameW, frameH, classOrientation, flipX);
     const previewPts = flatToPreviewPoints(flat, frameW, frameH, sensorOrientation);
     previewHands.push(previewPts);
 
@@ -370,6 +385,8 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
   let rightOk = false;
   let leftPalm = -1;
   let rightPalm = -1;
+  let leftValidity = -1;
+  let rightValidity = -1;
   let leftWrist: Pt | null = null;
   let rightWrist: Pt | null = null;
   const validPreviewHands: Pt[][] = [];
@@ -377,7 +394,8 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
   if (leftPython != null && leftPreview != null) {
     const hf = buildHandFeatures(leftPython, 'left', mouthPx);
     leftPalm = hf.palmWidth;
-    if (hf.palmWidth >= SIGN_CONFIG.MIN_PALM_WIDTH) {
+    leftValidity = hf.validityScale;
+    if (hf.validityScale >= SIGN_CONFIG.MIN_PALM_WIDTH) {
       features.set(hf.vector, 0);
       leftOk = true;
       leftWrist = { x: leftPython[0].x, y: leftPython[0].y };
@@ -387,7 +405,8 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
   if (rightPython != null && rightPreview != null) {
     const hf = buildHandFeatures(rightPython, 'right', mouthPx);
     rightPalm = hf.palmWidth;
-    if (hf.palmWidth >= SIGN_CONFIG.MIN_PALM_WIDTH) {
+    rightValidity = hf.validityScale;
+    if (hf.validityScale >= SIGN_CONFIG.MIN_PALM_WIDTH) {
       features.set(hf.vector, FEATURES_PER_HAND);
       rightOk = true;
       rightWrist = { x: rightPython[0].x, y: rightPython[0].y };
@@ -400,8 +419,13 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
   if (rightOk && rightPalm > 0) widths.push(rightPalm);
   const palmWidth = widths.length > 0 ? Math.max(...widths) : 0;
 
-  const previewFrame = previewFrameSize(frameW, frameH, sensorOrientation);
+  const previewFrame = uprightFrameSize(frameW, frameH, sensorOrientation);
   const box = boundingBox(validPreviewHands, previewFrame.width, previewFrame.height);
+
+  const activeOffset = leftOk ? 0 : rightOk ? FEATURES_PER_HAND : 0;
+  const openCount = leftOk || rightOk ? features[activeOffset + IDX_OPEN_COUNT] : -1;
+  const palmUpright = leftOk || rightOk ? features[activeOffset + IDX_PALM_UPRIGHT] : -1;
+  const mouthDist = leftOk || rightOk ? features[activeOffset + IDX_MOUTH_DIST] : -1;
 
   return {
     features,
@@ -417,9 +441,16 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
     debug: {
       leftPalm,
       rightPalm,
-      pythonRot: pythonRotationDeg(classOrientation),
+      leftValidity,
+      rightValidity,
       sensorOrientation,
+      classOrientation,
       mouth: mouthPx != null,
+      isMirrored,
+      flipX,
+      openCount,
+      palmUpright,
+      mouthDist,
     },
   };
 }
