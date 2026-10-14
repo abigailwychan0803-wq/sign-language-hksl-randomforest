@@ -14,7 +14,12 @@ import { buildFrameFeatures } from './featureEngineering';
 import { detectHandLandmarks, isHandLandmarkerAvailable } from './handLandmarks';
 import { MotionWindowBuffer, handsForLabel, handsPresenceOk } from './motionRuntime';
 import type { FrameSample } from './motionWindow';
-import type { FramePayload, HandDetectionResult, SignDetection } from './types';
+import type {
+  FramePayload,
+  HandDetectionResult,
+  LandmarkOverlay,
+  SignDetection,
+} from './types';
 
 /** Target detection rate; native VIDEO tracking keeps up better than IMAGE mode. */
 const TARGET_FPS = 15;
@@ -87,6 +92,7 @@ function analysisScale(frameWidth: number, frameHeight: number): { width: number
 
 export function useSignRecognition() {
   const [detection, setDetection] = useState<SignDetection | null>(null);
+  const [landmarks, setLandmarks] = useState<LandmarkOverlay | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,6 +128,7 @@ export function useSignRecognition() {
     setIsReady(false);
     setError(null);
     setDetection(null);
+    setLandmarks(null);
     lastDetectionRef.current = null;
     lastDetectionAtRef.current = 0;
 
@@ -199,10 +206,16 @@ export function useSignRecognition() {
 
     if (payload.hands.length === 0) {
       buffer.addEmpty(timestamp);
+      setLandmarks(null);
     } else {
       const built = buildFrameFeatures(payload);
       box = built.box;
       frame = built.frame;
+      setLandmarks(
+        built.previewHands.length > 0
+          ? { hands: built.previewHands, frame: built.frame }
+          : null,
+      );
       if (shouldLog) {
         console.log(
           `[sign] features leftOk=${built.leftOk} rightOk=${built.rightOk} leftPalm=${built.debug.leftPalm.toFixed(1)} rightPalm=${built.debug.rightPalm.toFixed(1)} rot=${built.debug.pythonRot} mouth=${built.debug.mouth ? 'yes' : 'no'} box=${box ? 'yes' : 'null'}`,
@@ -323,5 +336,5 @@ export function useSignRecognition() {
     [onPayload, resize],
   );
 
-  return { frameProcessor, detection, isReady, error };
+  return { frameProcessor, detection, landmarks, isReady, error };
 }

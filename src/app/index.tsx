@@ -97,7 +97,7 @@ function CameraScreen() {
     format != null
       ? Math.min(SIGN_CONFIG.CAMERA_FPS, format.maxFps)
       : SIGN_CONFIG.CAMERA_FPS;
-  const { frameProcessor, detection, isReady, error } = useSignRecognition();
+  const { frameProcessor, detection, landmarks, isReady, error } = useSignRecognition();
 
   useEffect(() => {
     if (!hasPermission) {
@@ -170,7 +170,7 @@ function CameraScreen() {
         resizeMode="cover"
         pixelFormat="rgb"
       />
-      <SignOverlay detection={detection} />
+      <SignOverlay detection={detection} landmarks={landmarks} />
 
       <SafeAreaView style={styles.topBar} pointerEvents="box-none">
         {error ? (

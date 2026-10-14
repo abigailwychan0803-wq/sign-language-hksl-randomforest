@@ -53,6 +53,16 @@ export interface FramePayload {
 
 export type SignColor = readonly [number, number, number];
 
+/** One hand's 21 landmarks in upright preview pixel space. */
+export type HandSkeleton = Array<{ x: number; y: number }>;
+
+/** Live landmark overlay payload (drawn every frame like main.py). */
+export interface LandmarkOverlay {
+  hands: HandSkeleton[];
+  /** Upright frame dimensions the points are relative to (for cover-fit mapping). */
+  frame: { width: number; height: number };
+}
+
 /** A single confident detection to render as a labeled box. */
 export interface SignDetection {
   label: string;

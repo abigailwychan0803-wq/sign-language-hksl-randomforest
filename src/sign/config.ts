@@ -1,16 +1,20 @@
 /**
  * Calibration constants for the sign-recognition pipeline.
  *
- * Python reference (main2.py):
+ * Python reference (main.py):
  *   frame = cv2.flip(frame, 1)   # mirror BEFORE MediaPipe Holistic
- *   hand_to_pixels: x * w, y * h on the flipped sensor buffer (no rotation)
- *   build_frame_features(left_slot, right_slot, face, image.shape)
+ *   hand_to_pixels: x * w, y * h on the flipped buffer (no extra rotation)
+ *
+ * On Android, Hand Landmarker landmarks behave like VisionCamera sensor-buffer
+ * coordinates (landscape when the phone is held portrait). Overlay unwraps
+ * that into preview space; classifier features flip + rotate into the same
+ * upright layout Python trains on.
  */
 export const SIGN_CONFIG = {
   /**
-   * Frame orientation used for landmark transforms. Set to 'portrait' to ignore the
-   * sensor-reported value (often 'landscape-left' on a portrait-held phone).
-   * Use 'auto' to derive from frame.orientation.
+   * Orientation fed to PYTHON_ROTATION when it is "auto". "portrait" forces a
+   * stable 90° classifier rotation on portrait-held phones even if the sensor
+   * reports landscape-left.
    */
   ORIENTATION: "portrait" as
     | "auto"
@@ -18,25 +22,35 @@ export const SIGN_CONFIG = {
     | "landscape-left"
     | "landscape-right"
     | "portrait-upside-down",
-  /** Mirror x before rotation — matches cv2.flip(frame, 1) before MediaPipe. */
+  /** Mirror x — matches cv2.flip(frame, 1) before MediaPipe in Python. */
   FLIP_X: true,
-  /** Mirror x in display/preview space (front camera preview is usually mirrored). */
-  MIRROR_PREVIEW: true,
-  /** Swap Hand Landmarker Left/Right labels if left/right slot is inverted. */
-  SWAP_HANDEDNESS: true,
-  /** Clockwise rotation for classifier features only (not used for overlay boxes). */
+  /**
+   * Mirror x in overlay space. VisionCamera's preview is not mirrored by default
+   * on Android (unlike many stock camera apps), so keep this false unless you
+   * also set Camera isMirrored.
+   */
+  MIRROR_PREVIEW: false,
+  /**
+   * Hand Landmarker labels anatomical Left/Right on the unflipped buffer.
+   * Python Holistic also uses anatomical slots, so do NOT swap after JS flip.
+   */
+  SWAP_HANDEDNESS: false,
+  /**
+   * Clockwise rotation for classifier features (sensor buffer → upright hands).
+   * Overlay uses a separate sensor→preview unwrap; keep these in sync empirically.
+   */
   PYTHON_ROTATION: 90 as 0 | 90 | 180 | 270 | "auto",
   /** How long (ms) to keep the last box visible after hands drop or a frame fails. */
   DETECTION_HOLD_MS: 400,
   /** Minimum palm width in pixels (sign_features min_palm_width). */
   MIN_PALM_WIDTH: 40,
-  /** Bounding-box padding (main2.py bounding_box pad). */
+  /** Bounding-box padding (main.py bounding_box pad). */
   BOX_PAD: 16,
-  /** OnnxRuntimeSignClassifier min_confidence (main2.py: 0.55). */
+  /** OnnxRuntimeSignClassifier min_confidence (main.py: 0.55). */
   MIN_CONFIDENCE: 0.55,
-  /** OnnxRuntimeSignClassifier margin (main2.py: 0.10). */
+  /** OnnxRuntimeSignClassifier margin (main.py: 0.10). */
   MARGIN: 0.1,
-  /** detect_and_draw / consider gate (main2.py: 0.6). */
+  /** detect_and_draw / consider gate (main.py: 0.6). */
   DISPLAY_CONFIDENCE: 0.6,
   /** Rolling window length for motion features (sign_features.WINDOW_SECONDS). */
   WINDOW_SECONDS: 1.0,
@@ -79,3 +93,30 @@ export const MOTION_FEATURE_COUNT = MOTION_FEATURES_PER_HAND * 2 + 7;
  * dual-hand pose (114) + motion stats (57) = 171.
  */
 export const TOTAL_FEATURES = FRAME_FEATURES + MOTION_FEATURE_COUNT; // 171
+
+/** MediaPipe hand topology (same edges drawn in main.py / Holistic HAND_CONNECTIONS). */
+export const HAND_CONNECTIONS: ReadonlyArray<readonly [number, number]> = [
+  [0, 1],
+  [1, 2],
+  [2, 3],
+  [3, 4],
+  [0, 5],
+  [5, 6],
+  [6, 7],
+  [7, 8],
+  [0, 9],
+  [9, 10],
+  [10, 11],
+  [11, 12],
+  [0, 13],
+  [13, 14],
+  [14, 15],
+  [15, 16],
+  [0, 17],
+  [17, 18],
+  [18, 19],
+  [19, 20],
+  [5, 9],
+  [9, 13],
+  [13, 17],
+] as const;

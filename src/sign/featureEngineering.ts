@@ -1,18 +1,15 @@
 /**
- * TypeScript port of sign-language/src/sign_features.py + main2.py coordinate flow.
+ * TypeScript port of sign-language/src/sign_features.py + main.py coordinate flow.
  *
- * Python (main2.py):
+ * Python (main.py):
  *   1. frame = cv2.flip(frame, 1)          — mirror BEFORE MediaPipe
  *   2. holistic.process(flipped frame)
  *   3. hand_to_pixels: x * w, y * h        — w = shape[1], h = shape[0], NO rotation
  *   4. build_frame_features(left_slot, right_slot, face, image.shape)
  *
- * The Hand Landmarker plugin returns landmarks normalised to the raw sensor buffer
- * (e.g. 720p, orientation "landscape-left" when the phone is held portrait).
- * Face landmark 13 (mouth) is the motion-window anchor when the landmarker
- * returns it. Mirror + rotate in JS to reproduce the flipped-landscape
- * upright-hand space the model was trained on, and use a separate display
- * transform for overlay boxes.
+ * Android landmarks arrive in VisionCamera sensor-buffer space (often landscape
+ * while the phone is held portrait). Overlay unwraps that into the portrait
+ * preview; classifier features flip + rotate into Python's upright layout.
  */
 import { FEATURES_PER_HAND, FRAME_FEATURES, SIGN_CONFIG } from './config';
 import type { FramePayload } from './types';
@@ -60,8 +57,8 @@ function effectiveOrientation(reported: string): string {
 }
 
 /**
- * Rotation that maps raw sensor landmarks into the same upright-hand layout Python
- * sees on a flipped landscape webcam frame (capture_dataset / main2.py).
+ * Classifier rotation that maps sensor-buffer landmarks into the upright-hand
+ * layout Python sees on a flipped landscape webcam frame.
  */
 function pythonRotationDeg(orientation: string): number {
   const cfg = SIGN_CONFIG.PYTHON_ROTATION;
@@ -80,7 +77,7 @@ function pythonRotationDeg(orientation: string): number {
 }
 
 /**
- * Preview surface size for a VisionCamera frame (see getSurfaceSize in useSkiaFrameProcessor).
+ * Preview surface size for a VisionCamera frame (sensor landscape → portrait).
  */
 function previewFrameSize(
   frameW: number,
@@ -98,8 +95,7 @@ function previewFrameSize(
 
 /**
  * Map a sensor-normalised landmark to portrait preview pixels.
- * Uses the sensor-reported orientation (not ORIENTATION override) so the box
- * aligns with what VisionCamera renders. Classifier features use a separate path.
+ * Uses the sensor-reported orientation so the skeleton matches the camera view.
  */
 function toPreviewPixel(
   nx: number,
@@ -138,9 +134,15 @@ function toPreviewPixel(
 
 /**
  * sign_features.hand_to_pixels on the Python-equivalent frame.
- * Order: mirror (cv2.flip) → rotate → x*w, y*h with sensor w/h (no swap).
+ * Order: mirror (cv2.flip) → rotate → x*w, y*h with sensor w/h.
  */
-function toPythonPixel(nx: number, ny: number, frameW: number, frameH: number, orientation: string): Pt {
+function toPythonPixel(
+  nx: number,
+  ny: number,
+  frameW: number,
+  frameH: number,
+  orientation: string,
+): Pt {
   if (SIGN_CONFIG.FLIP_X) nx = 1 - nx;
   const rot = pythonRotationDeg(orientation);
   const [rx, ry] = rotateNorm(nx, ny, rot);
@@ -301,6 +303,8 @@ export interface FrameFeatures {
   anchor: Pt | null;
   box: { x: number; y: number; width: number; height: number } | null;
   frame: { width: number; height: number };
+  /** Upright preview-space landmarks for every detected hand (incl. below palm gate). */
+  previewHands: Pt[][];
   debug: {
     leftPalm: number;
     rightPalm: number;
@@ -311,7 +315,7 @@ export interface FrameFeatures {
 }
 
 /**
- * sign_features.build_frame_features + main2.py bounding_box (display space).
+ * sign_features.build_frame_features + main.py bounding_box (display space).
  */
 export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
   const frameW = payload.width;
@@ -324,11 +328,12 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
     mouthPx = toPythonPixel(payload.mouth.x, payload.mouth.y, frameW, frameH, classOrientation);
   }
 
-  // Holistic slots: left_hand_landmarks / right_hand_landmarks (body-relative).
+  // Holistic slots: left_hand_landmarks / right_hand_landmarks (anatomical).
   let leftPython: Pt[] | null = null;
   let rightPython: Pt[] | null = null;
   let leftPreview: Pt[] | null = null;
   let rightPreview: Pt[] | null = null;
+  const previewHands: Pt[][] = [];
 
   for (let i = 0; i < payload.hands.length && i < 2; i++) {
     const flat = payload.hands[i];
@@ -341,6 +346,7 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
 
     const pyPts = flatToPythonPoints(flat, frameW, frameH, classOrientation);
     const previewPts = flatToPreviewPoints(flat, frameW, frameH, sensorOrientation);
+    previewHands.push(previewPts);
 
     if (slot === 'left' && leftPython == null) {
       leftPython = pyPts;
@@ -407,6 +413,7 @@ export function buildFrameFeatures(payload: FramePayload): FrameFeatures {
     anchor: mouthPx,
     box,
     frame: previewFrame,
+    previewHands,
     debug: {
       leftPalm,
       rightPalm,
