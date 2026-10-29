@@ -9,6 +9,10 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "com.abigail.digisignhk",
+      "entitlements": {
+        "com.apple.developer.kernel.extended-virtual-addressing": true,
+        "com.apple.developer.kernel.increased-memory-limit": true
+      },
       "infoPlist": {
         "NSCameraUsageDescription": "DigiSignHK needs camera access to recognize hand signs in real time."
       },
